@@ -8,8 +8,7 @@ def load_accounts_from_config(config_path="config.yaml"):
     return config.get("accounts", [])
 
 def main():
-    # date_str = input("Enter the date (YYYY-MM-DD): ")
-    date_str = "2025-06-26"
+    date_str = input("Enter the date (YYYY-MM-DD): ")
 
     print("Loading accounts")
     accounts = load_accounts_from_config()
