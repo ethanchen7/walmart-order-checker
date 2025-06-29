@@ -58,7 +58,7 @@ def extract_order_number_from_body(msg):
 
 def connect_and_search(imap_server, email_user, email_pass, date_str):
     date_formatted = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d-%b-%Y")
-    folders_to_check = ['INBOX', '[Gmail]/Spam']
+    folders_to_check = ['INBOX', '[Gmail]/Spam', 'Bulk']
 
     confirmed_orders = set()
     cancelled_orders = set()
