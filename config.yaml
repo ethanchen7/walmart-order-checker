@@ -1,0 +1,4 @@
+accounts:
+  - email: test123@gmail.com
+    password: 'app password'
+    imap_server: imap.gmail.com
