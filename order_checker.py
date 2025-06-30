@@ -1,7 +1,6 @@
 import imaplib
 import email
 import re
-import os
 from datetime import datetime
 from email.header import decode_header
 from datetime import datetime
@@ -58,6 +57,8 @@ def extract_order_number_from_body(msg):
 
 def connect_and_search(imap_server, email_user, email_pass, date_str):
     date_formatted = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d-%b-%Y")
+    # Gmail: INBOX, Gmail/Spam
+    # Yahoo: INBOX, Bulk
     folders_to_check = ['INBOX', '[Gmail]/Spam', 'Bulk']
 
     confirmed_orders = set()
