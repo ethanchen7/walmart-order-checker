@@ -24,7 +24,7 @@ def main():
         print(f"Checking email {email_user}")
         alive, cancels, orders = connect_and_search(imap_server, email_user, email_pass, date_str)
         print(f"\n{email_user} — {alive} order(s), {cancels} cancellation(s), {orders} order(s)")
-        print(f"\nStick rate: {round((alive / orders) * 100, 2)}%")
+        if orders: print(f"\nStick rate: {round((alive / orders) * 100, 2)}%")
         total_alive += alive
         total_cancels += cancels
         total_orders += orders
@@ -32,7 +32,7 @@ def main():
     print("\n======= TOTAL =======")
     print(f"Alive: {total_alive}")
     print(f"Total orders: {total_orders}")
-    print(f"Overall stick rate: {round((total_alive / total_orders) * 100, 2)}")
+    if total_orders: print(f"Overall stick rate: {round((total_alive / total_orders) * 100, 2)}")
     
 
 if __name__ == "__main__":
