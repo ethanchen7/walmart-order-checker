@@ -22,12 +22,12 @@ def main():
         imap_server = acc["imap_server"]
 
         print(f"Checking email {email_user}")
-        alive, cancels, orders = connect_and_search(imap_server, email_user, email_pass, date_str)
-        print(f"\n{email_user} — {alive} order(s), {cancels} cancellation(s), {orders} order(s)")
-        if orders: print(f"\nStick rate: {round((alive / orders) * 100, 2)}%")
+        alive, cancels = connect_and_search(imap_server, email_user, email_pass, date_str)
+        print(f"\n{email_user} — {alive} alive order(s), {cancels} cancellation(s)")
+        if alive or cancels: print(f"\nStick rate: {round((alive / (alive + cancels)) * 100, 2)}%")
         total_alive += alive
         total_cancels += cancels
-        total_orders += orders
+        total_orders += alive + cancels
 
     print("\n======= TOTAL =======")
     print(f"Alive: {total_alive}")
