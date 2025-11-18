@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from order_checker import connect_and_search
 import yaml
 
@@ -7,7 +8,9 @@ def load_accounts_from_config(config_path="config.yaml"):
     return config.get("accounts", [])
 
 def main():
-    date_str = input("Enter the date (YYYY-MM-DD): ")
+    mode = input("Mode? Optional, defaults to walmart. Options: walmart | bestbuy | apple | coin: ") or "walmart"
+    start_date_str = input("Enter the date (YYYY-MM-DD) or press enter for today: ") or (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    end_date_str = input("Enter the date (YYYY-MM-DD) or press enter for 99 days out: ") or (datetime.now() + timedelta(days=99)).strftime("%Y-%m-%d")
 
     print("Loading accounts")
     accounts = load_accounts_from_config()
@@ -22,7 +25,7 @@ def main():
         imap_server = acc["imap_server"]
 
         print(f"Checking email {email_user}")
-        alive, cancels = connect_and_search(imap_server, email_user, email_pass, date_str)
+        alive, cancels = connect_and_search(imap_server, email_user, email_pass, start_date_str, end_date_str, mode)
         print(f"\n{email_user} — {alive} alive order(s), {cancels} cancellation(s)")
         if alive or cancels: print(f"\nStick rate: {round((alive / (alive + cancels)) * 100, 2)}%")
         total_alive += alive

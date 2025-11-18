@@ -1,63 +1,104 @@
+from collections import defaultdict
 import imaplib
 import email
-import re
 from datetime import datetime
 from email.header import decode_header
 from datetime import datetime
-from bs4 import BeautifulSoup
 
-YAHOO_IMAP_SERVER = "imap.mail.yahoo.com"
-GMAIL_IMAP_SERVER = "imap.gmail.com"
-# Get a unique file name per run
-RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
-OUTPUT_FILE = f"alive_orders_{RUN_ID}.txt"
+from apple_utils import extract_apple_order_info
+from coin_utils import extract_coin_order_number_from_body, extract_coin_order_number_from_subject
+from config import MODE_TO_KEYWORDS, MODE_TO_SENDER, OUTPUT_FILE, YAHOO_IMAP_SERVER
+from bestbuy_utils import extract_bestbuy_order_number_from_body
+from walmart_utils import extract_walmart_order_number_from_body, extract_walmart_order_number_from_subject
 
 def write_to_file(alive_orders, email_user):
     with open(OUTPUT_FILE, "a") as f:
         for order in alive_orders:
             f.write(f"{email_user};{order}\n")
 
+def apple_write_to_file(email_to_item_name):
+    print(email_to_item_name)
+    with open(OUTPUT_FILE, "a") as f:
+        for email in email_to_item_name:
+            for item_name in email_to_item_name[email]:
+                for order_number in email_to_item_name[email][item_name]:
+                    order_status = email_to_item_name[email][item_name][order_number]
+                    f.write(f"{email};{item_name};{order_number};{order_status}\n")
 
-def extract_order_number_from_cancel_subject(subject):
-    match = re.search(r"order\s+#(\d{15})", subject.lower())
-    if match:
-        return match.group(1)
-    return None
+def resolve_walmart_orders(subject, mail, num, confirmed_orders, cancelled_orders):
+    if "thanks for your" in subject.lower():
+        typ, data = mail.fetch(num, '(RFC822)')
+        if typ != 'OK':
+            return
+        msg = email.message_from_bytes(data[0][1])
+        order_number = extract_walmart_order_number_from_body(msg)
+        if order_number:
+            confirmed_orders.add(order_number)
 
-def extract_order_number_from_body(msg):
-    body = ""
+    elif "canceled" in subject.lower():
+        flat_order_number = extract_walmart_order_number_from_subject(subject)
+        if flat_order_number:
+            cancelled_orders.add(flat_order_number)
 
-    if msg.is_multipart():
-        for part in msg.walk():
-            if part.get_content_type() == "text/plain":
-                payload = part.get_payload(decode=True)
-                if payload:
-                    body += payload.decode(errors="ignore")
+def resolve_bestbuy_orders(subject, mail, num, confirmed_orders, cancelled_orders):
+    typ, data = mail.fetch(num, '(RFC822)')
+    if typ != 'OK':
+        return
+    msg = email.message_from_bytes(data[0][1])
+    if "thanks for your" in subject.lower():
+        order_number = extract_bestbuy_order_number_from_body(msg)
+        if order_number:
+            confirmed_orders.add(order_number)
+    elif "cancelled" in subject.lower() or "cancellation" in subject.lower():
+        order_number = extract_bestbuy_order_number_from_body(msg)
+        if order_number:
+            cancelled_orders.add(order_number)
+        else:
+            raise Exception("No order number found in this email!")
 
-            elif part.get_content_type() == "text/html":
-                payload = part.get_payload(decode=True)
-                if payload:
-                    html = payload.decode(errors="ignore")
-                    soup = BeautifulSoup(html, "html.parser")
-                    body += soup.get_text()
+def resolve_apple_orders(subject, mail, num, email_to_item_name):
+    typ, data = mail.fetch(num, '(RFC822)')
+    if typ != 'OK':
+        return
+    msg = email.message_from_bytes(data[0][1])
+    recipient = msg.get('To', '')
+    item_name, order_number, order_status = extract_apple_order_info(msg)
+    email_to_item_name[recipient] = {
+        item_name: {
+            order_number: order_status
+        }
+    }
 
+def resolve_coin_orders(subject, mail, num, confirmed_orders, cancelled_orders):
+    if "confirmed" in subject.lower():
+        typ, data = mail.fetch(num, '(RFC822)')
+        if typ != 'OK':
+            return
+        msg = email.message_from_bytes(data[0][1])
+        order_number = extract_coin_order_number_from_body(msg)
+        if order_number:
+            confirmed_orders.add(order_number)
+
+    elif "canceled" in subject.lower():
+        flat_order_number = extract_coin_order_number_from_subject(subject)
+        if flat_order_number:
+            cancelled_orders.add(flat_order_number)
+
+def get_alive_orders(confirmed_orders, cancelled_orders, mode):
+    if mode == "walmart":
+        return [
+            o for o in confirmed_orders
+            if o.replace("-", "") not in cancelled_orders
+        ]
     else:
-        if msg.get_content_type() == "text/html":
-            payload = msg.get_payload(decode=True)
-            if payload:
-                html = payload.decode(errors="ignore")
-                soup = BeautifulSoup(html, "html.parser")
-                body = soup.get_text()
+        return [
+            o for o in confirmed_orders
+            if o not in cancelled_orders
+        ]
 
-    match = re.search(r"Order number:\s+(\d{7}-\d{8})", body)
-    if match:
-        return match.group(1)
-    return None
-
-
-
-def connect_and_search(imap_server, email_user, email_pass, date_str):
-    date_formatted = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d-%b-%Y")
+def connect_and_search(imap_server, email_user, email_pass, start_date_str, end_date_str, mode):
+    start_date_formatted = datetime.strptime(start_date_str, "%Y-%m-%d").strftime("%d-%b-%Y")
+    end_date_formatted = datetime.strptime(end_date_str, "%Y-%m-%d").strftime("%d-%b-%Y")
     # Gmail: INBOX, Gmail/Spam
     # Yahoo: INBOX, Bulk
     gmail_folders_to_check = ['INBOX', '[Gmail]/Spam']
@@ -65,17 +106,16 @@ def connect_and_search(imap_server, email_user, email_pass, date_str):
 
     confirmed_orders = set()
     cancelled_orders = set()
+    email_to_item_name = defaultdict()
 
     try:
         mail = imaplib.IMAP4_SSL(imap_server)
         mail.login(email_user, email_pass)
 
-        subject_keywords = [
-            "thanks for your",
-            "canceled"
-        ]
+        subject_keywords = MODE_TO_KEYWORDS[mode]
 
         folders_to_check = yahoo_folders_to_check if imap_server == YAHOO_IMAP_SERVER else gmail_folders_to_check
+        sender = MODE_TO_SENDER[mode.lower()]
 
         for folder in folders_to_check:
             try:
@@ -83,7 +123,7 @@ def connect_and_search(imap_server, email_user, email_pass, date_str):
 
                 for keyword in subject_keywords:
                     # Use SUBJECT filter to narrow search
-                    search_criteria = f'(ON "{date_formatted}" FROM "walmart.com" SUBJECT "{keyword}")'
+                    search_criteria = f'(SINCE "{start_date_formatted}" BEFORE "{end_date_formatted}" FROM "{sender}" SUBJECT "{keyword}")'
                     typ, msg_ids = mail.search(None, search_criteria)
                     if typ != 'OK' or not msg_ids[0]:
                         continue
@@ -100,19 +140,14 @@ def connect_and_search(imap_server, email_user, email_pass, date_str):
                         if isinstance(subject, bytes):
                             subject = subject.decode(encoding or "utf-8")
 
-                        if "thanks for your" in subject.lower():
-                            typ, data = mail.fetch(num, '(RFC822)')
-                            if typ != 'OK':
-                                continue
-                            msg = email.message_from_bytes(data[0][1])
-                            order_number = extract_order_number_from_body(msg)
-                            if order_number:
-                                confirmed_orders.add(order_number)
-
-                        elif "canceled" in subject.lower():
-                            flat_order_number = extract_order_number_from_cancel_subject(subject)
-                            if flat_order_number:
-                                cancelled_orders.add(flat_order_number)
+                        if mode == "walmart":
+                            resolve_walmart_orders(subject, mail, num, confirmed_orders, cancelled_orders)
+                        elif mode == "bestbuy":
+                            resolve_bestbuy_orders(subject, mail, num, confirmed_orders, cancelled_orders)
+                        elif mode == "apple":
+                            resolve_apple_orders(subject, mail, num, email_to_item_name)
+                        else:
+                            resolve_coin_orders(subject, mail, num, confirmed_orders, cancelled_orders)
 
             except Exception as e:
                 print(f"Error checking folder {folder}: {e}")
@@ -122,16 +157,15 @@ def connect_and_search(imap_server, email_user, email_pass, date_str):
     except Exception as e:
         print(f"Failed to check {email_user}: {e}")
 
-    # Match normalized order numbers (remove dashes)
-    alive_orders = [
-        o for o in confirmed_orders
-        if o.replace("-", "") not in cancelled_orders
-    ]
-    
-    print("\n-------- Alive Orders: --------")
-    print(alive_orders)
+    if mode == "apple":
+        apple_write_to_file(email_to_item_name)
+        return len(email_to_item_name), 0
+    else: 
+        alive_orders = get_alive_orders(confirmed_orders, cancelled_orders, mode)
+        print("\n-------- Alive Orders: --------")
+        print(alive_orders)
 
-    write_to_file(alive_orders, email_user)
+        write_to_file(alive_orders, email_user)
 
-    return len(alive_orders), len(cancelled_orders)
+        return len(alive_orders), len(cancelled_orders)
 
